@@ -1,6 +1,6 @@
 use aw_client_rust::AwClient;
 use aw_models::{Bucket, Event};
-use chrono::{DateTime, Duration as ChronoDuration, NaiveDateTime, TimeDelta, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use dirs::config_dir;
 use env_logger::Env;
 use log::{info, warn};
@@ -14,20 +14,20 @@ use std::io::prelude::*;
 use std::process;
 use std::thread::sleep;
 use tokio::signal;
-use tokio::time::{interval, Duration};
 #[cfg(unix)]
 use tokio::signal::unix::{signal, SignalKind};
+use tokio::time::{interval, Duration};
 
-fn parse_time_string(time_str: &str) -> Option<ChronoDuration> {
+fn parse_time_string(time_str: &str) -> Option<TimeDelta> {
     let re = Regex::new(r"^(\d+)([dhm])$").unwrap();
     if let Some(caps) = re.captures(time_str) {
         let amount: i64 = caps.get(1)?.as_str().parse().ok()?;
         let unit = caps.get(2)?.as_str();
 
         match unit {
-            "d" => Some(ChronoDuration::days(amount)),
-            "h" => Some(ChronoDuration::hours(amount)),
-            "m" => Some(ChronoDuration::minutes(amount)),
+            "d" => Some(TimeDelta::days(amount)),
+            "h" => Some(TimeDelta::hours(amount)),
+            "m" => Some(TimeDelta::minutes(amount)),
             _ => None,
         }
     } else {
@@ -40,7 +40,7 @@ async fn sync_historical_data(
     aw_client: &AwClient,
     username: &str,
     apikey: &str,
-    from_time: ChronoDuration,
+    from_time: TimeDelta,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let from_timestamp = (Utc::now() - from_time).timestamp();
     let url = format!(
@@ -63,13 +63,10 @@ async fn sync_historical_data(
             // Get timestamp from the track
             if let Some(date) = track["date"]["uts"].as_str() {
                 if let Ok(timestamp) = date.parse::<i64>() {
-                    // TODO: remove the deprecated from_utc and from_timestamp
                     let event = Event {
                         id: None,
-                        timestamp: DateTime::<Utc>::from_utc(
-                            NaiveDateTime::from_timestamp(timestamp, 0),
-                            Utc,
-                        ),
+                        timestamp: DateTime::<Utc>::from_timestamp(timestamp, 0)
+                            .expect("Invalid timestamp"),
                         duration: TimeDelta::seconds(30),
                         data: event_data,
                     };
@@ -129,8 +126,7 @@ async fn run_unix_loop(
     polling_time: TimeDelta,
     polling_interval: u64,
 ) {
-    let mut sigterm = signal(SignalKind::terminate())
-        .expect("Failed to set up SIGTERM handler");
+    let mut sigterm = signal(SignalKind::terminate()).expect("Failed to set up SIGTERM handler");
 
     loop {
         tokio::select! {
@@ -239,7 +235,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let args: Vec<String> = env::args().collect();
     let mut port: u16 = 5600;
-    let mut sync_duration: Option<ChronoDuration> = None;
+    let mut sync_duration: Option<TimeDelta> = None;
 
     let mut idx = 1;
     while idx < args.len() {
@@ -348,7 +344,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let polling_time = TimeDelta::seconds(polling_interval as i64);
-    let mut interval = interval(Duration::from_secs(polling_interval as u64));
+    let interval = interval(Duration::from_secs(polling_interval as u64));
 
     let client = reqwest::ClientBuilder::new()
         .timeout(Duration::from_secs(5))
@@ -366,10 +362,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     #[cfg(unix)]
-    run_unix_loop(interval, client, url, aw_client, polling_time, polling_interval).await;
+    run_unix_loop(
+        interval,
+        client,
+        url,
+        aw_client,
+        polling_time,
+        polling_interval,
+    )
+    .await;
 
     #[cfg(windows)]
-    run_windows_loop(interval, client, url, aw_client, polling_time, polling_interval).await;
+    run_windows_loop(
+        interval,
+        client,
+        url,
+        aw_client,
+        polling_time,
+        polling_interval,
+    )
+    .await;
 
     return Ok(());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_time_string() {
+        // Test valid inputs
+        assert_eq!(parse_time_string("7d"), Some(TimeDelta::days(7)));
+        assert_eq!(parse_time_string("24h"), Some(TimeDelta::hours(24)));
+        assert_eq!(parse_time_string("30m"), Some(TimeDelta::minutes(30)));
+        
+        // Test invalid inputs
+        assert_eq!(parse_time_string(""), None);
+        assert_eq!(parse_time_string("30s"), None);  // Invalid unit
+        assert_eq!(parse_time_string("abc"), None);  // Invalid format
+        assert_eq!(parse_time_string("-1d"), None);  // Negative number
+    }
 }
