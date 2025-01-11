@@ -293,7 +293,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .expect("Unable to create directory");
         }
         let mut file = File::create(&config_path).expect("Unable to create file");
-        file.write_all(b"apikey: your-api-key\nusername: your_username\npolling_interval: 10")
+        file.write_all(b"username: your_username\napikey: your-api-key\npolling_interval: 10")
             .expect("Unable to write to file");
         panic!("Please set your api key and username at {:?}", config_path);
     }
