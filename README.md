@@ -24,7 +24,7 @@ You can then add `aw-watcher-lastfm` to `autostart_modules` in your `aw-qt.toml`
 i.e:
 ```ini
 [aw-qt]
-autostart_modules = ["aw-server-rust", "aw-watcher-afk", "aw-awatcher", "aw-watcher-lastfm"]
+autostart_modules = ["aw-server-rust","aw-awatcher", "aw-watcher-lastfm"]
 ```
 
 ## Installation from source
