@@ -1,8 +1,9 @@
 name: Build and Release Binaries
 
 on:
-  release:
-    types: [created]
+  push:
+    tags:
+      - 'v*.*.*'
 
 jobs:
   build:
@@ -59,13 +60,13 @@ jobs:
     - name: rename and zip artifacts
       run: |
         mv artifacts/aw-watcher-lastfm-linux aw-watcher-lastfm
-        zip -r aw-watcher-lastfm-linux.zip aw-watcher-lastfm
+        zip aw-watcher-lastfm-linux.zip aw-watcher-lastfm
         rm -rf aw-watcher-lastfm
         mv artifacts/aw-watcher-lastfm-macos aw-watcher-lastfm
-        zip -r aw-watcher-lastfm-macos.zip aw-watcher-lastfm
+        zip aw-watcher-lastfm-macos.zip aw-watcher-lastfm
         rm -rf aw-watcher-lastfm
         mv artifacts/aw-watcher-lastfm-windows.exe aw-watcher-lastfm.exe
-        zip -r aw-watcher-lastfm-windows.zip aw-watcher-lastfm.exe
+        zip aw-watcher-lastfm-windows.zip aw-watcher-lastfm.exe
         rm -rf aw-watcher-lastfm.exe
 
     - name: Create Release
@@ -75,9 +76,9 @@ jobs:
       with:
         tag_name: ${{ github.ref_name }}
         name: Release ${{ github.ref_name }}
-        draft: false
+        draft: true
         prerelease: false
         files: |
-          artifacts/aw-watcher-lastfm-linux/aw-watcher-lastfm-linux
-          artifacts/aw-watcher-lastfm-macos/aw-watcher-lastfm-macos
-          artifacts/aw-watcher-lastfm-windows.exe/aw-watcher-lastfm-windows.exe
+          aw-watcher-lastfm-linux.zip
+          aw-watcher-lastfm-macos.zip
+          aw-watcher-lastfm-windows.zip
