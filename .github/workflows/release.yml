@@ -21,7 +21,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Set up Rust toolchain
       uses: dtolnay/rust-toolchain@stable
@@ -40,7 +40,7 @@ jobs:
         fi
 
     - name: Upload artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: ${{ matrix.artifact_name }}
         path: target/release/${{ matrix.artifact_name }}
@@ -52,12 +52,24 @@ jobs:
     
     steps:
     - name: Download all artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         path: artifacts
+    
+    - name: rename and zip artifacts
+      run: |
+        mv artifacts/aw-watcher-lastfm-linux aw-watcher-lastfm
+        zip -r aw-watcher-lastfm-linux.zip aw-watcher-lastfm
+        rm -rf aw-watcher-lastfm
+        mv artifacts/aw-watcher-lastfm-macos aw-watcher-lastfm
+        zip -r aw-watcher-lastfm-macos.zip aw-watcher-lastfm
+        rm -rf aw-watcher-lastfm
+        mv artifacts/aw-watcher-lastfm-windows.exe aw-watcher-lastfm.exe
+        zip -r aw-watcher-lastfm-windows.zip aw-watcher-lastfm.exe
+        rm -rf aw-watcher-lastfm.exe
 
     - name: Create Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
