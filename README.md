@@ -1,5 +1,5 @@
 # Activitywatch watcher for last.fm
-[![Build](https://github.com/brayo-pip/aw-watcher-lastfm/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/brayo-pip/aw-watcher-lastfm/actions/workflows/build.yml) [![dependency status](https://deps.rs/repo/github/0xbrayo/aw-watcher-lastfm/status.svg)](https://deps.rs/repo/github/0xbrayo/aw-watcher-lastfm)
+[![Build](https://github.com/brayo-pip/aw-watcher-lastfm/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/brayo-pip/aw-watcher-lastfm/actions/workflows/build.yml) [![built using gptme](https://img.shields.io/badge/built%20using-gptme%20%F0%9F%A4%96-5151f5?style=flat)](https://github.com/gptme/gptme) [![dependency status](https://deps.rs/repo/github/0xbrayo/aw-watcher-lastfm/status.svg)](https://deps.rs/repo/github/0xbrayo/aw-watcher-lastfm) 
 
 This is a simple activitywatch watcher for last.fm scrobble data. It uses the last.fm API to fetch scrobbles and sends them to the activitywatch server.
 
