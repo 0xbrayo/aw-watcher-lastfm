@@ -1,5 +1,6 @@
 # Activitywatch watcher for last.fm
-[![Build](https://github.com/brayo-pip/aw-watcher-lastfm/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/brayo-pip/aw-watcher-lastfm/actions/workflows/build.yml) [![built using gptme](https://img.shields.io/badge/built%20using-gptme%20%F0%9F%A4%96-5151f5?style=flat)](https://github.com/gptme/gptme) [![dependency status](https://deps.rs/repo/github/0xbrayo/aw-watcher-lastfm/status.svg)](https://deps.rs/repo/github/0xbrayo/aw-watcher-lastfm) 
+
+[![Build](https://github.com/0xbrayo/aw-watcher-lastfm/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/0xbrayo/aw-watcher-lastfm/actions/workflows/build.yml) [![built using gptme](https://img.shields.io/badge/built%20using-gptme%20%F0%9F%A4%96-5151f5?style=flat)](https://github.com/gptme/gptme) [![dependency status](https://deps.rs/repo/github/0xbrayo/aw-watcher-lastfm/status.svg)](https://deps.rs/repo/github/0xbrayo/aw-watcher-lastfm)
 
 This is a simple activitywatch watcher for last.fm scrobble data. It uses the last.fm API to fetch scrobbles and sends them to the activitywatch server.
 
@@ -16,7 +17,7 @@ Download the binary for your OS from releases, or use one the the options below
 ## Installation using cargo
 
 ```bash
-cargo install --git https://github.com/brayo-pip/aw-watcher-lastfm.git
+cargo install --git https://github.com/0xbrayo/aw-watcher-lastfm.git
 ```
 
 You can then add `aw-watcher-lastfm` to `autostart_modules` in your `aw-qt.toml`
@@ -32,7 +33,7 @@ autostart_modules = ["aw-server-rust","aw-awatcher", "aw-watcher-lastfm"]
 Clone the repository
 
 ```bash
-git clone https://github.com/brayo-pip/aw-watcher-lastfm.git
+git clone https://github.com/0xbrayo/aw-watcher-lastfm.git
 ```
 
 cd into the directory
@@ -50,7 +51,7 @@ cargo run
 
 This should take a few seconds then the events should be visible in localhost:5600. If aw-server or aw-server-rust is running.
 
-![image](https://github.com/brayo-pip/aw-watcher-lastfm/assets/62670517/1c4cb5ff-5f2d-455b-845b-a3fcd8200f94)
+![image](https://github.com/0xbrayo/aw-watcher-lastfm/assets/62670517/1c4cb5ff-5f2d-455b-845b-a3fcd8200f94)
 
 
 
