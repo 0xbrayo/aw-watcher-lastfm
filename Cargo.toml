@@ -12,8 +12,9 @@ chrono = "0.4.38"
 dirs = "6.0.0"
 env_logger = "0.11.5"
 log = "0.4.22"
-reqwest = { version = "0.12.7", features = ["json"] }
+reqwest = { version = "0.12.7", features = ["json", "blocking"] }
 serde_json = "1.0.128"
 serde_yaml = "0.9.34"
-tokio = { version = "1.40.0", features = ["full"] }
+ctrlc = "3.4.4"
+crossbeam-channel = "0.5.13"
 regex = "1.10.3"

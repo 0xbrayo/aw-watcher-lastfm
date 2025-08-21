@@ -1,9 +1,10 @@
-use aw_client_rust::AwClient;
+use aw_client_rust::blocking::AwClient;
 use aw_models::Event;
 use chrono::{DateTime, TimeDelta, Utc};
+use crossbeam_channel::{self, RecvTimeoutError, TryRecvError};
 use dirs::config_dir;
 use env_logger::Env;
-use log::{info, warn};
+use log::{info, debug, warn};
 use regex::Regex;
 use reqwest;
 use serde_json::{Map, Value};
@@ -11,12 +12,8 @@ use serde_yaml;
 use std::env;
 use std::fs::{DirBuilder, File};
 use std::io::prelude::*;
-use std::process;
 use std::thread::sleep;
-use tokio::signal;
-#[cfg(unix)]
-use tokio::signal::unix::{signal, SignalKind};
-use tokio::time::{interval, Duration};
+use std::time::{Duration, Instant};
 
 fn parse_time_string(time_str: &str) -> Option<TimeDelta> {
     let re = Regex::new(r"^(\d+)([dhm])$").unwrap();
@@ -35,8 +32,8 @@ fn parse_time_string(time_str: &str) -> Option<TimeDelta> {
     }
 }
 
-async fn sync_historical_data(
-    client: &reqwest::Client,
+fn sync_historical_data(
+    client: &reqwest::blocking::Client,
     aw_client: &AwClient,
     username: &str,
     apikey: &str,
@@ -44,15 +41,21 @@ async fn sync_historical_data(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let from_timestamp = (Utc::now() - from_time).timestamp();
     let url = format!(
-        "http://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&user={}&api_key={}&format=json&limit=200&from={}",
+        "https://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&user={}&api_key={}&format=json&limit=200&from={}",
         username, apikey, from_timestamp
     );
 
-    let response = client.get(&url).send().await?;
-    let v: Value = response.json().await?;
-
+    let response = client.get(&url).send()?.error_for_status()?;
+    let v: Value = response.json()?;
+    if v.get("error").is_some() {
+        let msg = v
+            .get("message")
+            .and_then(|m| m.as_str())
+            .unwrap_or("unknown error");
+        return Err(format!("last.fm API error: {}", msg).into());
+    }
     if let Some(tracks) = v["recenttracks"]["track"].as_array() {
-        info!("Syncing {} historical tracks...", tracks.len());
+        debug!("Syncing {} historical tracks...", tracks.len());
         for track in tracks.iter().rev() {
             let mut event_data: Map<String, Value> = Map::new();
 
@@ -73,14 +76,13 @@ async fn sync_historical_data(
 
                     aw_client
                         .insert_event("aw-watcher-lastfm", &event)
-                        .await
                         .unwrap_or_else(|e| {
                             warn!("Error inserting historical event: {:?}", e);
                         });
                 }
             }
         }
-        info!("Historical sync completed!");
+        debug!("Historical sync completed!");
     }
 
     Ok(())
@@ -94,78 +96,72 @@ fn get_config_path() -> Option<std::path::PathBuf> {
     })
 }
 
-async fn create_bucket(aw_client: &AwClient) -> Result<(), Box<dyn std::error::Error>> {
-    let res = aw_client
-        .create_bucket_simple("aw-watcher-lastfm", "currently-playing")
-        .await;
-    match res {
-        Ok(_) => Ok(()),
-        Err(e) => {
-            warn!("Error creating bucket: {:?}", e);
-            Err(Box::new(e))
-        }
-    }
-}
-#[cfg(unix)]
-async fn run_unix_loop(
-    mut interval: tokio::time::Interval,
-    client: reqwest::Client,
+fn run_loop(
+    client: reqwest::blocking::Client,
     url: String,
     aw_client: AwClient,
     polling_time: TimeDelta,
     polling_interval: u64,
 ) {
-    let mut sigterm = signal(SignalKind::terminate()).expect("Failed to set up SIGTERM handler");
+    let interval_duration = Duration::from_secs(polling_interval);
+    let (tx, rx) = crossbeam_channel::unbounded();
+
+    // Set up signal handler for graceful shutdown
+    ctrlc::set_handler(move || {
+        info!("Received interrupt signal, shutting down gracefully...");
+        let _ = tx.send(());
+    })
+    .expect("Error setting Ctrl+C handler");
 
     loop {
-        tokio::select! {
-            _ = signal::ctrl_c() => {
-                info!("Ctrl+C received, shutting down...");
-                process::exit(0);
+        let start_time = Instant::now();
+
+        handle_lastfm_update(&client, &url, &aw_client, polling_time, polling_interval);
+
+        let elapsed = start_time.elapsed();
+
+        // Only sleep if we haven't already exceeded the interval
+        if elapsed < interval_duration {
+            let sleep_duration = interval_duration - elapsed;
+
+            // Use channel to wait for either timeout or shutdown signal
+            match rx.recv_timeout(sleep_duration) {
+                Ok(()) => {
+                    // Received shutdown signal
+                    break;
+                }
+                Err(RecvTimeoutError::Timeout) => {
+                    // Normal timeout, continue loop
+                    continue;
+                }
+                Err(RecvTimeoutError::Disconnected) => {
+                    // Channel disconnected, should not happen but break anyway
+                    break;
+                }
             }
-            _ = sigterm.recv() => {
-                info!("SIGTERM received, shutting down...");
-                process::exit(0);
-            }
-            _ = interval.tick() => {
-                handle_lastfm_update(&client, &url, &aw_client, polling_time, polling_interval).await;
+        } else {
+            // Check for shutdown signal without blocking
+            match rx.try_recv() {
+                Ok(()) => break,
+                Err(TryRecvError::Empty) => continue,
+                Err(TryRecvError::Disconnected) => break,
             }
         }
     }
+
+    info!("Shutdown complete.");
 }
 
-#[cfg(windows)]
-async fn run_windows_loop(
-    mut interval: tokio::time::Interval,
-    client: reqwest::Client,
-    url: String,
-    aw_client: AwClient,
-    polling_time: TimeDelta,
-    polling_interval: u64,
-) {
-    loop {
-        tokio::select! {
-            _ = signal::ctrl_c() => {
-                info!("Ctrl+C received, shutting down...");
-                process::exit(0);
-            }
-            _ = interval.tick() => {
-                handle_lastfm_update(&client, &url, &aw_client, polling_time, polling_interval).await;
-            }
-        }
-    }
-}
-
-async fn handle_lastfm_update(
-    client: &reqwest::Client,
+fn handle_lastfm_update(
+    client: &reqwest::blocking::Client,
     url: &str,
     aw_client: &AwClient,
     polling_time: TimeDelta,
     polling_interval: u64,
 ) {
-    let response = client.get(url).send().await;
+    let response = client.get(url).send();
     let v: Value = match response {
-        Ok(response) => match response.json().await {
+        Ok(response) => match response.json() {
             Ok(json) => json,
             Err(e) => {
                 warn!("Error parsing json: {}", e);
@@ -179,12 +175,12 @@ async fn handle_lastfm_update(
     };
 
     if v["recenttracks"]["track"][0]["@attr"]["nowplaying"].as_str() != Some("true") {
-        info!("No song is currently playing");
+        debug!("No song is currently playing");
         return;
     }
 
     let mut event_data: Map<String, Value> = Map::new();
-    info!(
+    debug!(
         "Track: {} - {}",
         v["recenttracks"]["track"][0]["name"], v["recenttracks"]["track"][0]["artist"]["#text"]
     );
@@ -211,14 +207,12 @@ async fn handle_lastfm_update(
 
     aw_client
         .heartbeat("aw-watcher-lastfm", &event, polling_interval as f64)
-        .await
         .unwrap_or_else(|e| {
             warn!("Error sending heartbeat: {:?}", e);
         });
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() {
     let config_dir = get_config_path().expect("Unable to get config path");
     let config_path = config_dir.join("config.yaml");
 
@@ -259,11 +253,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("  --port PORT       Specify custom port");
                 println!("  --sync DURATION   Sync historical data (format: 7d, 24h, 30m)");
                 println!("  --help            Show this help message");
-                return Ok(());
             }
             _ => {
                 println!("Unknown argument: {}", args[idx]);
-                return Ok(());
             }
         }
     }
@@ -319,23 +311,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         panic!("Please set your api key at {:?}", config_path);
     }
 
-    let url = format!("http://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&user={}&api_key={}&format=json&limit=1", username, apikey);
+    let url = format!("https://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&user={}&api_key={}&format=json&limit=1", username, apikey);
 
     let mut aw_client = AwClient::new("localhost", port, "aw-watcher-lastfm-rust").unwrap();
 
-    let mut res = create_bucket(&aw_client).await;
+    let mut res = aw_client.create_bucket_simple("aw-watcher-lastfm", "currently-playing");
     let retries = 5;
     while res.is_err() && retries > 0 {
         warn!("Error creating bucket: {:?}", res.err());
         sleep(Duration::from_secs(1));
         aw_client = AwClient::new("localhost", port, "aw-watcher-lastfm-rust").unwrap();
-        res = create_bucket(&aw_client).await;
+        res = aw_client.create_bucket_simple("aw-watcher-lastfm", "currently-playing");
     }
 
     let polling_time = TimeDelta::seconds(polling_interval as i64);
-    let interval = interval(Duration::from_secs(polling_interval as u64));
 
-    let client = reqwest::ClientBuilder::new()
+    let client = reqwest::blocking::ClientBuilder::new()
         .timeout(Duration::from_secs(5))
         .build()
         .unwrap();
@@ -343,36 +334,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Handle historical sync if requested
     if let Some(duration) = sync_duration {
         info!("Starting historical sync...");
-        match sync_historical_data(&client, &aw_client, &username, &apikey, duration).await {
+        match sync_historical_data(&client, &aw_client, &username, &apikey, duration) {
             Ok(_) => info!("Historical sync completed successfully"),
             Err(e) => warn!("Error during historical sync: {:?}", e),
         }
         info!("Starting real-time tracking...");
     }
 
-    #[cfg(unix)]
-    run_unix_loop(
-        interval,
-        client,
-        url,
-        aw_client,
-        polling_time,
-        polling_interval,
-    )
-    .await;
-
-    #[cfg(windows)]
-    run_windows_loop(
-        interval,
-        client,
-        url,
-        aw_client,
-        polling_time,
-        polling_interval,
-    )
-    .await;
-
-    return Ok(());
+    run_loop(client, url, aw_client, polling_time, polling_interval);
 }
 
 #[cfg(test)]
