@@ -12,7 +12,7 @@ use serde_yaml;
 use std::env;
 use std::fs::{DirBuilder, File};
 use std::io::prelude::*;
-use std::thread::sleep;
+use std::process::exit;
 use std::time::{Duration, Instant};
 
 fn parse_time_string(time_str: &str) -> Option<TimeDelta> {
@@ -313,17 +313,14 @@ fn main() {
 
     let url = format!("https://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&user={}&api_key={}&format=json&limit=1", username, apikey);
 
-    let mut aw_client = AwClient::new("localhost", port, "aw-watcher-lastfm-rust").unwrap();
-
-    let mut res = aw_client.create_bucket_simple("aw-watcher-lastfm", "currently-playing");
-    let retries = 5;
-    while res.is_err() && retries > 0 {
-        warn!("Error creating bucket: {:?}", res.err());
-        sleep(Duration::from_secs(1));
-        aw_client = AwClient::new("localhost", port, "aw-watcher-lastfm-rust").unwrap();
-        res = aw_client.create_bucket_simple("aw-watcher-lastfm", "currently-playing");
+    let aw_client = AwClient::new("localhost", port, "aw-watcher-lastfm-rust").unwrap();
+    
+    if aw_client.wait_for_start().is_err() {
+        warn!("Failed to connect to ActivityWatch Server");
+        exit(1)
     }
-
+    aw_client.create_bucket_simple("aw-watcher-lastfm", "currently-playing").expect("Failed to create a bucket");
+    
     let polling_time = TimeDelta::seconds(polling_interval as i64);
 
     let client = reqwest::blocking::ClientBuilder::new()
