@@ -4,7 +4,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use crossbeam_channel::{self, RecvTimeoutError, TryRecvError};
 use dirs::config_dir;
 use env_logger::Env;
-use log::{info, debug, warn};
+use log::{debug, info, warn};
 use regex::Regex;
 use reqwest;
 use serde_json::{Map, Value};
@@ -328,6 +328,10 @@ fn main() {
 
     let client = reqwest::blocking::ClientBuilder::new()
         .timeout(Duration::from_secs(5))
+        .user_agent(concat!(
+            "aw-watcher-lastfm/",
+            env!("CARGO_PKG_VERSION")
+        ))
         .build()
         .unwrap();
 
