@@ -61,6 +61,33 @@ If everything works as expected, you can build the binary, add it to `aw-qt` or 
 cargo build --release
 ```
 
+# Logging
+
+This watcher follows ActivityWatch logging conventions and writes logs to platform-appropriate directories:
+
+- **macOS**: `~/Library/Logs/activitywatch/aw-watcher-lastfm/`
+- **Linux**: `~/.cache/activitywatch/log/aw-watcher-lastfm/`
+- **Windows**: `%LOCALAPPDATA%\activitywatch\activitywatch\aw-watcher-lastfm\`
+
+## Logging Options
+
+```bash
+# Run with debug logging on console
+./aw-watcher-lastfm --verbose
+
+# Run in testing mode (debug logs + testing port)
+./aw-watcher-lastfm --testing
+
+# Override console log level via environment variable
+LOG_LEVEL=trace ./aw-watcher-lastfm
+```
+
+**Log files capture all logs from our module only (TRACE level)**, while console output respects the log level settings and may include dependency logs.
+
+Log files use a simple rotation system:
+- Production: `aw-watcher-lastfm.log` (rotates to `aw-watcher-lastfm-old.log` at 32MB)
+- Testing: `aw-watcher-lastfm-testing.log` (rotates to `aw-watcher-lastfm-testing-old.log` at 32MB)
+
 # Contributing
 
 Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.

@@ -1,10 +1,10 @@
+mod logging;
+
 use aw_client_rust::blocking::AwClient;
 use aw_models::Event;
 use chrono::{DateTime, TimeDelta, Utc};
 use crossbeam_channel::{self, RecvTimeoutError, TryRecvError};
-use dirs::config_dir;
-use env_logger::Env;
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 use regex::Regex;
 use reqwest;
 use serde_json::{Map, Value};
@@ -88,14 +88,6 @@ fn sync_historical_data(
     Ok(())
 }
 
-fn get_config_path() -> Option<std::path::PathBuf> {
-    config_dir().map(|mut path| {
-        path.push("activitywatch");
-        path.push("aw-watcher-lastfm");
-        path
-    })
-}
-
 fn run_loop(
     client: reqwest::blocking::Client,
     url: String,
@@ -164,7 +156,7 @@ fn handle_lastfm_update(
         Ok(response) => match response.json() {
             Ok(json) => json,
             Err(e) => {
-                warn!("Error parsing json: {}", e);
+                error!("Error parsing json: {}", e);
                 return;
             }
         },
@@ -213,12 +205,11 @@ fn handle_lastfm_update(
 }
 
 fn main() {
-    let config_dir = get_config_path().expect("Unable to get config path");
-    let config_path = config_dir.join("config.yaml");
-
     let args: Vec<String> = env::args().collect();
     let mut port: u16 = 5600;
     let mut sync_duration: Option<TimeDelta> = None;
+    let mut testing = false;
+    let mut verbose = false;
 
     let mut idx = 1;
     while idx < args.len() {
@@ -232,7 +223,12 @@ fn main() {
                 }
             }
             "--testing" => {
+                testing = true;
                 port = 5699;
+                idx += 1;
+            }
+            "--verbose" => {
+                verbose = true;
                 idx += 1;
             }
             "--sync" => {
@@ -247,26 +243,36 @@ fn main() {
                 }
             }
             "--help" => {
-                println!("Usage: aw-watcher-lastfm-rust [--testing] [--port PORT] [--sync DURATION] [--help]");
+                println!("Usage: aw-watcher-lastfm [--testing] [--verbose] [--port PORT] [--sync DURATION] [--help]");
                 println!("\nOptions:");
-                println!("  --testing         Use testing port (5699)");
+                println!("  --testing         Use testing port (5699) and enable debug logging");
+                println!("  --verbose         Enable verbose logging");
                 println!("  --port PORT       Specify custom port");
                 println!("  --sync DURATION   Sync historical data (format: 7d, 24h, 30m)");
                 println!("  --help            Show this help message");
+                return;
             }
-            _ => {
-                println!("Unknown argument: {}", args[idx]);
-            }
-        }
+             _ => {
+                 println!("Unknown argument: {}", args[idx]);
+                 idx += 1;
+             }
     }
 
-    let env = Env::default()
-        .filter_or("MY_LOG_LEVEL", "info")
-        .write_style_or("MY_LOG_STYLE", "always");
+    // Setup logging using ActivityWatch conventions
+    logging::setup_logger("aw-watcher-lastfm", testing, verbose).expect("Failed to setup logging");
 
-    env_logger::init_from_env(env);
+    if testing {
+        info!("Running in testing mode");
+    } else {
+        info!("Starting aw-watcher-lastfm");
+    }
+
+    let config_path = logging::get_config_path().expect("Unable to get config path");
 
     if !config_path.exists() {
+        let config_dir = config_path
+            .parent()
+            .expect("Unable to get config directory");
         if !config_dir.exists() {
             DirBuilder::new()
                 .recursive(true)
@@ -314,21 +320,20 @@ fn main() {
     let url = format!("https://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&user={}&api_key={}&format=json&limit=1", username, apikey);
 
     let aw_client = AwClient::new("localhost", port, "aw-watcher-lastfm-rust").unwrap();
-    
+
     if aw_client.wait_for_start().is_err() {
-        warn!("Failed to connect to ActivityWatch Server");
+        error!("Failed to connect to ActivityWatch Server");
         exit(1)
     }
-    aw_client.create_bucket_simple("aw-watcher-lastfm", "currently-playing").expect("Failed to create a bucket");
-    
+    aw_client
+        .create_bucket_simple("aw-watcher-lastfm", "currently-playing")
+        .expect("Failed to create a bucket");
+
     let polling_time = TimeDelta::seconds(polling_interval as i64);
 
     let client = reqwest::blocking::ClientBuilder::new()
         .timeout(Duration::from_secs(5))
-        .user_agent(concat!(
-            "aw-watcher-lastfm/",
-            env!("CARGO_PKG_VERSION")
-        ))
+        .user_agent(concat!("aw-watcher-lastfm/", env!("CARGO_PKG_VERSION")))
         .build()
         .unwrap();
 
