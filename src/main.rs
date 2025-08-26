@@ -320,13 +320,28 @@ fn main() {
 
     let aw_client = AwClient::new("localhost", port, "aw-watcher-lastfm-rust").unwrap();
 
-    if aw_client.wait_for_start().is_err() {
-        error!("Failed to connect to ActivityWatch Server");
-        exit(1)
+    let mut attempts = 0;
+    let max_attempts = 5;
+    let mut delay = std::time::Duration::from_millis(100);
+
+    while attempts < max_attempts {
+        attempts += 1;
+        match aw_client.create_bucket_simple("aw-watcher-lastfm", "currently-playing") {
+            Ok(_) => {
+                info!("Successfully created bucket on attempt {}", attempts);
+                break;
+            }
+            Err(e) => {
+                debug!("Failed to create bucket (attempt {}): {}", attempts, e);
+                if attempts >= max_attempts {
+                    error!("Failed to create bucket after {} attempts", max_attempts);
+                    exit(1);
+                }
+                std::thread::sleep(delay);
+                delay *= 2;
+            }
+        }
     }
-    aw_client
-        .create_bucket_simple("aw-watcher-lastfm", "currently-playing")
-        .expect("Failed to create a bucket");
 
     let polling_time = TimeDelta::seconds(polling_interval as i64);
 
