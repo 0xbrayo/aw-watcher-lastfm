@@ -6,9 +6,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use crossbeam_channel::{self, RecvTimeoutError, TryRecvError};
 use log::{debug, error, info, warn};
 use regex::Regex;
-use reqwest;
 use serde_json::{Map, Value};
-use serde_yaml;
 use std::env;
 use std::fs::{DirBuilder, File};
 use std::io::prelude::*;
@@ -252,10 +250,11 @@ fn main() {
                 println!("  --help            Show this help message");
                 return;
             }
-             _ => {
-                 println!("Unknown argument: {}", args[idx]);
-                 idx += 1;
-             }
+            _ => {
+                println!("Unknown argument: {}", args[idx]);
+                idx += 1;
+            }
+        }
     }
 
     // Setup logging using ActivityWatch conventions
@@ -276,7 +275,7 @@ fn main() {
         if !config_dir.exists() {
             DirBuilder::new()
                 .recursive(true)
-                .create(&config_dir)
+                .create(config_dir)
                 .expect("Unable to create directory");
         }
         let mut file = File::create(&config_path).expect("Unable to create file");
@@ -309,11 +308,11 @@ fn main() {
 
     drop(config_file);
 
-    if username == "your_username" || username == "" {
+    if username == "your_username" || username.is_empty() {
         panic!("Please set your username at {:?}", config_path);
     }
 
-    if apikey == "your-api-key" || apikey == "" {
+    if apikey == "your-api-key" || apikey.is_empty() {
         panic!("Please set your api key at {:?}", config_path);
     }
 
