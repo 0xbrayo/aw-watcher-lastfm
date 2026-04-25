@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 aw-client-rust = { git = "https://github.com/ActivityWatch/aw-server-rust.git", branch = "master" }
 aw-models = { git = "https://github.com/ActivityWatch/aw-server-rust.git", branch = "master" }
+aw-server = { git = "https://github.com/ActivityWatch/aw-server-rust.git", branch = "master" }
 chrono = "0.4.38"
 dirs = "6.0.0"
 fern = { version = "0.7", features = ["colored"] }
