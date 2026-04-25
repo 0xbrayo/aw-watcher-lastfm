@@ -8,8 +8,7 @@ use log::{debug, error, info, warn};
 use regex::Regex;
 use serde_json::{Map, Value};
 use std::env;
-use std::fs::{DirBuilder, File};
-use std::io::prelude::*;
+use std::fs::DirBuilder;
 use std::process::exit;
 use std::time::{Duration, Instant};
 
@@ -278,17 +277,15 @@ fn main() {
                 .create(config_dir)
                 .expect("Unable to create directory");
         }
-        let mut file = File::create(&config_path).expect("Unable to create file");
-        file.write_all(b"username: your_username\napikey: your-api-key\npolling_interval: 10")
-            .expect("Unable to write to file");
+        std::fs::write(
+            &config_path,
+            b"username: your_username\napikey: your-api-key\npolling_interval: 10",
+        )
+        .expect("Unable to write to file");
         panic!("Please set your api key and username at {:?}", config_path);
     }
 
-    let mut config_file = File::open(config_path.clone()).expect("Unable to open file");
-    let mut contents = String::new();
-    config_file
-        .read_to_string(&mut contents)
-        .expect("Unable to read file");
+    let contents = std::fs::read_to_string(&config_path).expect("Unable to read file");
 
     let yaml: Value =
         serde_yaml::from_str(&contents).expect("Unable to parse yaml from config file");
@@ -306,8 +303,6 @@ fn main() {
         panic!("Polling interval must be at least 3 seconds");
     }
 
-    drop(config_file);
-
     if username == "your_username" || username.is_empty() {
         panic!("Please set your username at {:?}", config_path);
     }
@@ -318,7 +313,14 @@ fn main() {
 
     let url = format!("https://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&user={}&api_key={}&format=json&limit=1", username, apikey);
 
-    let aw_client = AwClient::new("localhost", port, "aw-watcher-lastfm-rust").unwrap();
+    let aw_config = aw_server::config::create_config(testing);
+    let server_api_key = aw_config.auth.api_key;
+    match &server_api_key {
+        Some(_) => info!("Loaded API key from aw-server-rust config"),
+        None => warn!("No API key found in aw-server-rust config, proceeding unauthenticated"),
+    }
+    let aw_client =
+        AwClient::new_with_api_key("localhost", port, "aw-watcher-lastfm", server_api_key).unwrap();
 
     let mut attempts = 0;
     let max_attempts = 5;

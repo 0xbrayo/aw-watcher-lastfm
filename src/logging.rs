@@ -4,51 +4,39 @@ use std::path::PathBuf;
 use fern::colors::{Color, ColoredLevelConfig};
 
 pub fn get_config_dir() -> Option<PathBuf> {
-    let mut dir = dirs::config_dir()?;
-    dir.push("activitywatch");
-    dir.push("aw-watcher-lastfm");
+    let dir = dirs::config_dir()?
+        .join("activitywatch")
+        .join("aw-watcher-lastfm");
     create_dir_all(&dir).ok()?;
     Some(dir)
 }
 
 pub fn get_log_dir() -> Option<PathBuf> {
     #[cfg(target_os = "windows")]
-    let dir = {
-        let mut d = dirs::data_local_dir()?;
-        d.push("activitywatch");
-        d.push("activitywatch");
-        d.push("aw-watcher-lastfm");
-        d
-    };
+    let dir = dirs::data_local_dir()
+        .join("activitywatch")
+        .join("activitywatch")
+        .join("aw-watcher-lastfm");
 
     #[cfg(target_os = "macos")]
-    let dir = {
-        let mut d = dirs::home_dir()?;
-        d.push("Library");
-        d.push("Logs");
-        d.push("activitywatch");
-        d.push("aw-watcher-lastfm");
-        d
-    };
+    let dir = dirs::home_dir()?
+        .join("Library")
+        .join("Logs")
+        .join("activitywatch")
+        .join("aw-watcher-lastfm");
 
     #[cfg(target_os = "linux")]
-    let dir = {
-        let mut d = dirs::cache_dir()?;
-        d.push("activitywatch");
-        d.push("log");
-        d.push("aw-watcher-lastfm");
-        d
-    };
+    let dir = dirs::cache_dir()?
+        .join("activitywatch")
+        .join("log")
+        .join("aw-watcher-lastfm");
 
     create_dir_all(&dir).ok()?;
     Some(dir)
 }
 
 pub fn get_config_path() -> Option<PathBuf> {
-    get_config_dir().map(|mut path| {
-        path.push("config.yaml");
-        path
-    })
+    get_config_dir().map(|path| path.join("config.yaml"))
 }
 
 const MAX_LOG_SIZE: u64 = 32 * 1024 * 1024; // 32MB
@@ -117,17 +105,16 @@ pub fn setup_logger(module: &str, testing: bool, verbose: bool) -> Result<(), fe
     });
 
     // Use non-colored formatter for file output
-    let file_formatter = |out: fern::FormatCallback,
-                          message: &std::fmt::Arguments,
-                          record: &log::Record| {
-        out.finish(format_args!(
-            "[{}][{}][{}]: {}",
-            chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
-            record.level(),
-            record.target(),
-            message,
-        ))
-    };
+    let file_formatter =
+        |out: fern::FormatCallback, message: &std::fmt::Arguments, record: &log::Record| {
+            out.finish(format_args!(
+                "[{}][{}][{}]: {}",
+                chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+                record.level(),
+                record.target(),
+                message,
+            ))
+        };
 
     // Compute crate target ("aw-watcher-lastfm" -> "aw_watcher_lastfm")
     let crate_target = env!("CARGO_PKG_NAME").replace('-', "_");
