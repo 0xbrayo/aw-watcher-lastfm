@@ -6,6 +6,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use crossbeam_channel::{self, RecvTimeoutError, TryRecvError};
 use log::{debug, error, info, warn};
 use regex::Regex;
+use serde::Deserialize;
 use serde_json::{Map, Value};
 use std::env;
 use std::fs::DirBuilder;
@@ -201,6 +202,44 @@ fn handle_lastfm_update(
         });
 }
 
+#[derive(Deserialize)]
+struct AwServerConfig {
+    auth: Option<AuthConfig>,
+}
+
+#[derive(Deserialize)]
+struct AuthConfig {
+    api_key: String,
+}
+
+/// Reads the `[auth] api_key` field from an aw-server-rust TOML config file.
+/// Returns `None` if the file is missing, unreadable, or has no key configured.
+fn load_aw_server_api_key() -> Option<String> {
+    let config_path = dirs::config_dir()
+        .unwrap()
+        .join("activitywatch")
+        .join("aw-server-rust")
+        .join("config.toml");
+
+    let content = std::fs::read_to_string(config_path.clone())
+        .map_err(|e| {
+            debug!(
+                "Could not read aw-server-rust config at {:?}: {}",
+                config_path, e
+            )
+        })
+        .ok()?;
+    let config: AwServerConfig = toml::from_str(&content)
+        .map_err(|e| debug!("Could not parse aw-server-rust config: {}", e))
+        .ok()?;
+    let auth = config.auth?;
+    info!(
+        "Loaded API key from aw-server-rust config at {:?}",
+        config_path
+    );
+    Some(auth.api_key)
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     let mut port: u16 = 5600;
@@ -313,12 +352,8 @@ fn main() {
 
     let url = format!("https://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&user={}&api_key={}&format=json&limit=1", username, apikey);
 
-    let aw_config = aw_server::config::create_config(testing);
-    let server_api_key = aw_config.auth.api_key;
-    match &server_api_key {
-        Some(_) => info!("Loaded API key from aw-server-rust config"),
-        None => warn!("No API key found in aw-server-rust config, proceeding unauthenticated"),
-    }
+    let server_api_key = load_aw_server_api_key();
+
     let aw_client =
         AwClient::new_with_api_key("localhost", port, "aw-watcher-lastfm", server_api_key).unwrap();
 

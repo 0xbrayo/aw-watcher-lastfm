@@ -14,8 +14,10 @@ dirs = "6.0.0"
 fern = { version = "0.7", features = ["colored"] }
 log = "0.4.22"
 reqwest = { version = "0.12.7", features = ["json", "blocking"] }
+serde = { version = "1", features = ["derive"] }
 serde_json = "1.0.128"
 serde_yaml = "0.9.34"
+toml = "0.8"
 ctrlc = "3.4.4"
 crossbeam-channel = "0.5.13"
 regex = "1.10.3"
