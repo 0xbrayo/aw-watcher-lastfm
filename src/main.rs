@@ -105,9 +105,7 @@ fn run_loop(
 
     loop {
         let start_time = Instant::now();
-
         handle_lastfm_update(&client, &url, &aw_client, polling_time, polling_interval);
-
         let elapsed = start_time.elapsed();
 
         // Only sleep if we haven't already exceeded the interval
