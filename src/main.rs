@@ -5,7 +5,6 @@ use aw_models::Event;
 use chrono::{DateTime, TimeDelta, Utc};
 use crossbeam_channel::{self, RecvTimeoutError, TryRecvError};
 use log::{debug, error, info, warn};
-use regex::Regex;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use std::env;
@@ -13,20 +12,58 @@ use std::fs::DirBuilder;
 use std::process::exit;
 use std::time::{Duration, Instant};
 
-fn parse_time_string(time_str: &str) -> Option<TimeDelta> {
-    let re = Regex::new(r"^(\d+)([dhm])$").unwrap();
-    if let Some(caps) = re.captures(time_str) {
-        let amount: i64 = caps.get(1)?.as_str().parse().ok()?;
-        let unit = caps.get(2)?.as_str();
+#[derive(Deserialize, Debug)]
+struct TextValue {
+    #[serde(rename = "#text")]
+    text: String,
+}
 
-        match unit {
-            "d" => Some(TimeDelta::days(amount)),
-            "h" => Some(TimeDelta::hours(amount)),
-            "m" => Some(TimeDelta::minutes(amount)),
-            _ => None,
-        }
-    } else {
-        None
+#[derive(Deserialize, Debug)]
+struct TrackAttr {
+    nowplaying: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+struct TrackDate {
+    uts: String,
+}
+
+#[derive(Deserialize, Debug)]
+struct Track {
+    name: String,
+    artist: TextValue,
+    album: TextValue,
+    #[serde(rename = "@attr")]
+    attr: Option<TrackAttr>,
+    date: Option<TrackDate>,
+}
+
+#[derive(Deserialize, Debug)]
+struct RecentTracks {
+    track: Vec<Track>,
+}
+
+#[derive(Deserialize, Debug)]
+struct GetRecentTracksResponse {
+    recenttracks: Option<RecentTracks>,
+    error: Option<u64>,
+    message: Option<String>,
+}
+
+fn parse_time_string(time_str: &str) -> Option<TimeDelta> {
+    if time_str.is_empty() {
+        return None;
+    }
+    let (amount_str, unit) = time_str.split_at(time_str.len() - 1);
+    if amount_str.is_empty() || !amount_str.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    let amount: i64 = amount_str.parse().ok()?;
+    match unit {
+        "d" => Some(TimeDelta::days(amount)),
+        "h" => Some(TimeDelta::hours(amount)),
+        "m" => Some(TimeDelta::minutes(amount)),
+        _ => None,
     }
 }
 
@@ -44,26 +81,26 @@ fn sync_historical_data(
     );
 
     let response = client.get(&url).send()?.error_for_status()?;
-    let v: Value = response.json()?;
-    if v.get("error").is_some() {
-        let msg = v
-            .get("message")
-            .and_then(|m| m.as_str())
-            .unwrap_or("unknown error");
-        return Err(format!("last.fm API error: {}", msg).into());
+    let res: GetRecentTracksResponse = response.json()?;
+
+    if let Some(err) = res.error {
+        let msg = res.message.as_deref().unwrap_or("unknown error");
+        return Err(format!("last.fm API error (code {}): {}", err, msg).into());
     }
-    if let Some(tracks) = v["recenttracks"]["track"].as_array() {
-        debug!("Syncing {} historical tracks...", tracks.len());
-        for track in tracks.iter().rev() {
+
+    if let Some(recenttracks) = res.recenttracks {
+        debug!("Syncing {} historical tracks...", recenttracks.track.len());
+        let mut events = Vec::new();
+        for track in recenttracks.track.into_iter().rev() {
             let mut event_data: Map<String, Value> = Map::new();
 
-            event_data.insert("title".to_string(), track["name"].to_owned());
-            event_data.insert("artist".to_string(), track["artist"]["#text"].to_owned());
-            event_data.insert("album".to_string(), track["album"]["#text"].to_owned());
+            event_data.insert("title".to_string(), Value::from(track.name));
+            event_data.insert("artist".to_string(), Value::from(track.artist.text));
+            event_data.insert("album".to_string(), Value::from(track.album.text));
 
             // Get timestamp from the track
-            if let Some(date) = track["date"]["uts"].as_str() {
-                if let Ok(timestamp) = date.parse::<i64>() {
+            if let Some(date) = track.date {
+                if let Ok(timestamp) = date.uts.parse::<i64>() {
                     let event = Event {
                         id: None,
                         timestamp: DateTime::<Utc>::from_timestamp(timestamp, 0)
@@ -71,14 +108,17 @@ fn sync_historical_data(
                         duration: TimeDelta::seconds(30),
                         data: event_data,
                     };
-
-                    aw_client
-                        .insert_event("aw-watcher-lastfm", &event)
-                        .unwrap_or_else(|e| {
-                            warn!("Error inserting historical event: {:?}", e);
-                        });
+                    events.push(event);
                 }
             }
+        }
+
+        if !events.is_empty() {
+            aw_client
+                .insert_events("aw-watcher-lastfm", events)
+                .unwrap_or_else(|e| {
+                    warn!("Error inserting historical events: {:?}", e);
+                });
         }
         debug!("Historical sync completed!");
     }
@@ -148,7 +188,7 @@ fn handle_lastfm_update(
     polling_interval: u64,
 ) {
     let response = client.get(url).send();
-    let v: Value = match response {
+    let res: GetRecentTracksResponse = match response {
         Ok(response) => match response.json() {
             Ok(json) => json,
             Err(e) => {
@@ -162,29 +202,32 @@ fn handle_lastfm_update(
         }
     };
 
-    if v["recenttracks"]["track"][0]["@attr"]["nowplaying"].as_str() != Some("true") {
+    if let Some(err) = res.error {
+        let msg = res.message.as_deref().unwrap_or("unknown error");
+        error!("last.fm API error (code {}): {}", err, msg);
+        return;
+    }
+
+    let track = match res.recenttracks.as_ref().and_then(|rt| rt.track.first()) {
+        Some(t) => t,
+        None => {
+            debug!("No song is currently playing (empty track list)");
+            return;
+        }
+    };
+
+    let now_playing = track.attr.as_ref().and_then(|a| a.nowplaying.as_deref()) == Some("true");
+    if !now_playing {
         debug!("No song is currently playing");
         return;
     }
 
     let mut event_data: Map<String, Value> = Map::new();
-    debug!(
-        "Track: {} - {}",
-        v["recenttracks"]["track"][0]["name"], v["recenttracks"]["track"][0]["artist"]["#text"]
-    );
+    debug!("Track: {} - {}", track.name, track.artist.text);
 
-    event_data.insert(
-        "title".to_string(),
-        v["recenttracks"]["track"][0]["name"].to_owned(),
-    );
-    event_data.insert(
-        "artist".to_string(),
-        v["recenttracks"]["track"][0]["artist"]["#text"].to_owned(),
-    );
-    event_data.insert(
-        "album".to_string(),
-        v["recenttracks"]["track"][0]["album"]["#text"].to_owned(),
-    );
+    event_data.insert("title".to_string(), Value::from(track.name.clone()));
+    event_data.insert("artist".to_string(), Value::from(track.artist.text.clone()));
+    event_data.insert("album".to_string(), Value::from(track.album.text.clone()));
 
     let event = Event {
         id: None,
