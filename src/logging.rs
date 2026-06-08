@@ -13,7 +13,7 @@ pub fn get_config_dir() -> Option<PathBuf> {
 
 pub fn get_log_dir() -> Option<PathBuf> {
     #[cfg(target_os = "windows")]
-    let dir = dirs::data_local_dir()
+    let dir = dirs::data_local_dir()?
         .join("activitywatch")
         .join("activitywatch")
         .join("aw-watcher-lastfm");
