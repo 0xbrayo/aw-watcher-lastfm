@@ -20,3 +20,11 @@ repos:
         types: [rust]
         pass_filenames: false
         stages: [pre-push]
+      - id: cargo-check
+        name: cargo check
+        entry: cargo check --all-targets
+        language: system
+        types: [rust]
+        pass_filenames: false
+        stages: [pre-push]
+
