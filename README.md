@@ -7,7 +7,7 @@ This is a simple activitywatch watcher for last.fm scrobble data. It uses the la
 # Prerequisites
 
 - [Activitywatch](https://github.com/ActivityWatch/activitywatch)
-- [Rust](https://www.rust-lang.org/tools/install)
+- [Rust](https://www.rust-lang.org/tools/install) (for development)
 - [Last.fm API account](https://www.last.fm/)
 
 # Installation
