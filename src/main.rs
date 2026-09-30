@@ -7,6 +7,7 @@ use crossbeam_channel::{self, RecvTimeoutError, TryRecvError};
 use log::{debug, error, info, warn};
 use serde::Deserialize;
 use serde_json::{Map, Value};
+use std::collections::HashSet;
 use std::env;
 use std::fs::DirBuilder;
 use std::process::exit;
@@ -39,8 +40,16 @@ struct Track {
 }
 
 #[derive(Deserialize, Debug)]
+struct RecentTracksAttr {
+    #[serde(rename = "totalPages")]
+    total_pages: String,
+}
+
+#[derive(Deserialize, Debug)]
 struct RecentTracks {
     track: Vec<Track>,
+    #[serde(rename = "@attr")]
+    attr: Option<RecentTracksAttr>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -74,54 +83,97 @@ fn sync_historical_data(
     apikey: &str,
     from_time: TimeDelta,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let from_timestamp = (Utc::now() - from_time).timestamp();
-    let url = format!(
-        "https://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&user={}&api_key={}&format=json&limit=200&from={}",
-        username, apikey, from_timestamp
-    );
+    let from = Utc::now() - from_time;
 
-    let response = client.get(&url).send()?.error_for_status()?;
-    let res: GetRecentTracksResponse = response.json()?;
+    // Events already in the bucket for this range, so re-syncing an
+    // overlapping range doesn't insert the same scrobbles twice
+    let existing: HashSet<(DateTime<Utc>, Value, Value)> = aw_client
+        .get_events("aw-watcher-lastfm", Some(from), None, None)?
+        .into_iter()
+        .map(|e| {
+            let title = e.data.get("title").cloned().unwrap_or(Value::Null);
+            let artist = e.data.get("artist").cloned().unwrap_or(Value::Null);
+            (e.timestamp, title, artist)
+        })
+        .collect();
 
-    if let Some(err) = res.error {
-        let msg = res.message.as_deref().unwrap_or("unknown error");
-        return Err(format!("last.fm API error (code {}): {}", err, msg).into());
-    }
+    let mut events = Vec::new();
+    let mut page = 1;
+    loop {
+        let url = format!(
+            "https://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&user={}&api_key={}&format=json&limit=200&from={}&page={}",
+            username,
+            apikey,
+            from.timestamp(),
+            page
+        );
 
-    if let Some(recenttracks) = res.recenttracks {
-        debug!("Syncing {} historical tracks...", recenttracks.track.len());
-        let mut events = Vec::new();
-        for track in recenttracks.track.into_iter().rev() {
+        let response = client.get(&url).send()?.error_for_status()?;
+        let res: GetRecentTracksResponse = response.json()?;
+
+        if let Some(err) = res.error {
+            let msg = res.message.as_deref().unwrap_or("unknown error");
+            return Err(format!("last.fm API error (code {}): {}", err, msg).into());
+        }
+
+        let Some(recenttracks) = res.recenttracks else {
+            break;
+        };
+        let total_pages = recenttracks
+            .attr
+            .as_ref()
+            .and_then(|a| a.total_pages.parse::<u32>().ok())
+            .unwrap_or(1);
+        debug!(
+            "Fetched page {}/{} ({} tracks)",
+            page,
+            total_pages,
+            recenttracks.track.len()
+        );
+
+        for track in recenttracks.track {
+            // The now-playing track has no date; the real-time loop handles it
+            let Some(timestamp) = track
+                .date
+                .and_then(|d| d.uts.parse::<i64>().ok())
+                .and_then(|uts| DateTime::<Utc>::from_timestamp(uts, 0))
+            else {
+                continue;
+            };
+
+            let title = Value::from(track.name);
+            let artist = Value::from(track.artist.text);
+            if existing.contains(&(timestamp, title.clone(), artist.clone())) {
+                continue;
+            }
+
             let mut event_data: Map<String, Value> = Map::new();
-
-            event_data.insert("title".to_string(), Value::from(track.name));
-            event_data.insert("artist".to_string(), Value::from(track.artist.text));
+            event_data.insert("title".to_string(), title);
+            event_data.insert("artist".to_string(), artist);
             event_data.insert("album".to_string(), Value::from(track.album.text));
 
-            // Get timestamp from the track
-            if let Some(date) = track.date {
-                if let Ok(timestamp) = date.uts.parse::<i64>() {
-                    let event = Event {
-                        id: None,
-                        timestamp: DateTime::<Utc>::from_timestamp(timestamp, 0)
-                            .expect("Invalid timestamp"),
-                        duration: TimeDelta::seconds(30),
-                        data: event_data,
-                    };
-                    events.push(event);
-                }
-            }
+            events.push(Event {
+                id: None,
+                timestamp,
+                duration: TimeDelta::seconds(30),
+                data: event_data,
+            });
         }
 
-        if !events.is_empty() {
-            aw_client
-                .insert_events("aw-watcher-lastfm", events)
-                .unwrap_or_else(|e| {
-                    warn!("Error inserting historical events: {:?}", e);
-                });
+        if page >= total_pages {
+            break;
         }
-        debug!("Historical sync completed!");
+        page += 1;
     }
+
+    // Pages come newest first; insert in chronological order
+    events.sort_by_key(|e| e.timestamp);
+    debug!("Syncing {} historical tracks...", events.len());
+
+    if !events.is_empty() {
+        aw_client.insert_events("aw-watcher-lastfm", events)?;
+    }
+    debug!("Historical sync completed!");
 
     Ok(())
 }
