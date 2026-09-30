@@ -120,21 +120,23 @@ pub fn setup_logger(module: &str, testing: bool, verbose: bool) -> Result<(), fe
     let crate_target = env!("CARGO_PKG_NAME").replace('-', "_");
 
     let dispatch = fern::Dispatch::new()
-        .level(log::LevelFilter::Trace) // Always capture everything for file logging
-        // Formatting (console remains colored)
-        .format(move |out, message, record| {
-            out.finish(format_args!(
-                "[{}][{}][{}]: {}",
-                chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
-                colors.color(record.level()),
-                record.target(),
-                message,
-            ))
-        })
-        // Console output with configurable log level
+        // Drop records neither output wants before any formatting happens:
+        // everything at the console level, plus TRACE for our crate (file)
+        .level(log_level)
+        .level_for(crate_target.clone(), log::LevelFilter::Trace)
+        // Console output with configurable log level (colored)
         .chain(
             fern::Dispatch::new()
                 .level(log_level) // Respect user's log level for console
+                .format(move |out, message, record| {
+                    out.finish(format_args!(
+                        "[{}][{}][{}]: {}",
+                        chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+                        colors.color(record.level()),
+                        record.target(),
+                        message,
+                    ))
+                })
                 .chain(std::io::stdout()),
         )
         // File output only for our module at TRACE level
