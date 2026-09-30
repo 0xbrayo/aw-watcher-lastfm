@@ -108,8 +108,13 @@ fn sync_historical_data(
             page
         );
 
-        let response = client.get(&url).send()?.error_for_status()?;
-        let res: GetRecentTracksResponse = response.json()?;
+        // The URL carries the api key; strip it so it can't reach the logs
+        let response = client
+            .get(&url)
+            .send()
+            .and_then(|r| r.error_for_status())
+            .map_err(|e| e.without_url())?;
+        let res: GetRecentTracksResponse = response.json().map_err(|e| e.without_url())?;
 
         if let Some(err) = res.error {
             let msg = res.message.as_deref().unwrap_or("unknown error");
@@ -244,7 +249,7 @@ fn handle_lastfm_update(
         Ok(response) => match response.json() {
             Ok(json) => json,
             Err(e) => {
-                error!("Error parsing json: {}", e);
+                error!("Error parsing json: {}", e.without_url());
                 return;
             }
         },
